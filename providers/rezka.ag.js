@@ -88,7 +88,7 @@ class Worker {
                 data.filter(Boolean).forEach(({season, episode, name, quality, link, qualityLinkList}) => {
                     const fileName = this.filmType === FilmTypeEnum.FILM ?
                         `${dir}-[${quality}]-[${translatorList.get(this.translator_id) || this.translator_id}].mp4` :
-                        `${season}/s${season}-e${episode}.mp4`;
+                        `${season}/s${season}-e${episode.padStart(2, '0')}.mp4`;
                     const path = `${downloadDir}/${dir}/${fileName}`
                     content.push({
                         path,
