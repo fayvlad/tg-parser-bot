@@ -61,9 +61,9 @@ class Worker {
 
     get parseOrUploadKeyboard() {
         return [[
-            {text: `Upload to local store`, callback_data: stepEnum.WORKER_UPLOAD},
+            // {text: `Upload to local store`, callback_data: stepEnum.WORKER_UPLOAD},
             {text: `Get link`, callback_data: stepEnum.WORKER_GET_LINK},
-            {text: `to file`, callback_data: stepEnum.WORKER_TO_FILE},
+            {text: `Upload to file`, callback_data: stepEnum.WORKER_TO_FILE},
         ]];
     }
 
@@ -422,7 +422,6 @@ class Worker {
             );
         })
     }
-
 
     getMovieUrl() {
         return from(this.loadEpisodes({
