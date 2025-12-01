@@ -62,7 +62,8 @@ async function parseDir(msg, match, additionalMessage = '') {
             return;
         }
 
-        const items = await fs.promises.readdir(currentDir, {withFileTypes: true});
+        let items = await fs.promises.readdir(currentDir, {withFileTypes: true});
+        items = items.filter(item => !item.name.includes('DS_Store'));
         let message = [additionalMessage, `💻 "${currentDirTxt}":\n`].join('\r\n\n');
         const keyboard = {inline_keyboard: []};
         fileMap.clear();
@@ -111,7 +112,6 @@ async function parseDir(msg, match, additionalMessage = '') {
         }
 
         bot.sendMessage(chatId, message, {reply_markup: keyboard});
-
     } catch (err) {
         bot.sendMessage(chatId, '🚫 Помилка при читанні папки!');
         console.error(err);
@@ -326,6 +326,7 @@ const prepareListeners = (step) => {
             })
         ).subscribe();
     });
+
     step.on(stepEnum.WORKER_TO_FILE, (session) => {
         session.currentStep = stepEnum.WORKER_TO_FILE;
         session.worker.toFile(session.chatId).pipe(
@@ -343,27 +344,6 @@ const prepareListeners = (step) => {
             })
         ).subscribe();
     });
-
-    /*step.on(stepEnum.WORKER_DOWNLOAD_FROM_JSON, (session) => {
-        session.currentStep = stepEnum.WORKER_DOWNLOAD_FROM_JSON;
-        const jsonFilePath = session.worker.jsonFile;
-        console.log('jsonFilePath', jsonFilePath)
-
-        execFile("./download_series.sh", [`${jsonFilePath}`], (error, stdout, stderr) => {
-            if (error) {
-                console.error("Помилка виконання скрипта:", error.message);
-                bot.sendMessage(session.chatId, `ERROR: ${error}`);
-                return;
-            }
-            if (stderr) {
-                console.error("stderr:", stderr);
-            }
-            console.log("stdout:", stdout);
-            bot.sendMessage(session.chatId, stdout);
-        });
-        bot.sendMessage(session.chatId, `⏳ Завантаження у фоні!`);
-        console.log("🚀 Скрипт запущено у фоні!");
-    });*/
 
     step.on(stepEnum.WORKER_DOWNLOAD_FROM_JSON, (session) => {
         session.currentStep = stepEnum.WORKER_DOWNLOAD_FROM_JSON;
@@ -464,7 +444,7 @@ const prepareListeners = (step) => {
 const formatLinksMessage = (links, title) => {
     return links.reduce((res, cur) => {
         if (cur) {
-            res += `<a href="${cur.link}">${cur.name} (${cur.quality})</a>\n`;
+            res += `<a href="https://rezka.fayvlad.workers.dev/?target=${cur.link}">${cur.name} (${cur.quality})</a>\n`;
         }
         return res;
     }, `${title}\n\n`);

@@ -307,7 +307,25 @@ class Worker {
             }
             i++;
         }
-        return Buffer.from(replace, 'base64').toString('binary');
+        // return Buffer.from(replace, 'base64').toString('binary');
+        try {
+            const decoded = Buffer.from(replace, 'base64').toString('binary');
+            return this.sanitizeString(decoded);
+        } catch (error) {
+            console.error('Помилка декодування:', error);
+            return this.sanitizeString(replace);
+        }
+    }
+
+    sanitizeString(str) {
+        if (!str) return str;
+
+        return str
+            .replace(/[\x00-\x1F\x7F]/g, '')  // Binary control chars
+            .replace(/\\t/g, '')               // Literal \t
+            .replace(/\\u00[0-1][0-9A-Fa-f]/g, '') // \u0000-\u001F
+            .replace(/\$\$@/g, '')
+            .replace(/[^\x20-\x7E\u0080-\uFFFF]/g, '');
     }
 
     parseQualityLinkMap(links) {
@@ -438,7 +456,7 @@ class Worker {
     getTranslatorList() {
         const result = new Map();
         const listBlockHtml = (/<ul.*?"b-translators__list"(.*?)?<\/ul>/g.exec(this.html));
-        const regex = /<li.*?title="(.+?)?".*?b-translator__item.*?data-translator_id="(\d+?)?".*?(title="(.+?)?".*?)*<\/li>/g;
+        const regex = /<[a|li].*?title="(.+?)?".*?b-translator__item.*?data-translator_id="(\d+?)?".*?(title="(.+?)?".*?)*<\/[a|li]>/g;
         let list = [];
         if (!listBlockHtml) return result;
         while ((list = regex.exec(listBlockHtml[1])) !== null) {

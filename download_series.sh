@@ -21,7 +21,7 @@ create_dir() {
 
 # Перевіряємо чи файл існує
 if [ ! -f "$input_file" ]; then
-    echo "Помилка: файл $input_file не знайдено"
+    echo "🚫Помилка: файл $input_file не знайдено"
     exit 1
 fi
 
@@ -31,8 +31,9 @@ jq -c '.[]' "$input_file" | while read -r item; do
      # Отримуємо path та link
         path=$(echo "$item" | jq -r '.path')
         link=$(echo "$item" | jq -r '.link')
+        name=$(echo "$item" | jq -r '.name')
 
-        # echo "Завантаження: $path"
+        echo "⏳Завантаження: $name"
 
         # Створюємо директорію
         create_dir "$path"
