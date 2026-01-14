@@ -1,22 +1,22 @@
 // https://tp-back.starlight.digital/ua/show/stb/ukraina-mae-talant/sezon-2021/vypusk-5
 // https://teleportal.ua/ua/show/stb/ukraina-mae-talant/sezon-2021/vypusk-4
-const { fromPromise } = require("rxjs/internal/observable/innerFrom");
-const fetch = require("node-fetch");
+// rxjs innerFrom removed; ProviderBase.getHtml/getJson use fetch internally
 const stepEnum = require(`${__dirname}/../step-enum-util`);
 const cp = require("child_process");
-const { switchMap, tap, map, of, throwError } = require("rxjs");
-const fs = require("fs");
+const { switchMap, tap, map, of, forkJoin } = require("rxjs");
+// const fs = require("fs"); // fs is handled in ProviderBase if needed
 const playerLink = "https://fayvlad.github.io/player/?source=";
+const ProviderBase = require(`${__dirname}/provider.base`);
 
-class Worker {
+class Worker extends ProviderBase {
   constructor(link) {
+    super(link);
     console.log("Worker constructor - teleportal");
-    this.html = "";
     this.title = "";
     this.fileName = "";
     this.href = "";
+    this.itemList = "";
     this.hashId = [];
-    this.pageLink = link;
     this.teleportalApiUrl =
       "https://vcms-api2.starlight.digital/player-api/{{hash}}?referer={{referer}}&lang=ua";
   }
@@ -34,45 +34,7 @@ class Worker {
     ];
   }
 
-  _writeToPlaylist(data) {
-    const path = `download/m3u/parser${data.type === "lq" ? ".lq" : ""}.m3u`;
-    // Const path = `/mnt/video/playlists/m3u/parser${data.type === 'lq' ? '.lq' : ''}.m3u`;
-
-    fs.appendFileSync(path, `#EXTINF:0,${data.title}\n`);
-    fs.appendFileSync(path, `${data.playlistLink}\n`);
-  }
-
-  _loadPage(link) {
-    return fromPromise(
-      fetch(link, {
-        referrer: link,
-        headers: { accept: "*/*" },
-        referrerPolicy: "no-referrer-when-downgrade",
-      }),
-    );
-  }
-
-  _decodeUrlFromText = (href) => [
-    ...decodeURIComponent(href).matchAll(/file=(http.+?m3u8)?\?/g),
-  ];
-
-  _prepareResult() {
-    const addonLink = "http://192.168.1.200/m3u/tv/";
-    // Const addonLink = 'http://192.168.1.200/m3u/tv/';
-    return this._decodeUrlFromText(this.href).map((itm) => {
-      const link = itm[1];
-      const type = link.match(/(\w*)\.mp4/)[1];
-      const name = `${this.fileName}.${type}.m3u8`;
-
-      return {
-        link,
-        name,
-        type,
-        title: this.title,
-        playlistLink: `${addonLink}${name}`,
-      };
-    });
-  }
+  // use ProviderBase implementations for playlist helpers and page loading
 
   parse() {
     const download = async (uri, filename) =>
@@ -85,6 +47,22 @@ class Worker {
   }
 
   getLinks() {
+    if (this.itemList && Array.isArray(this.itemList) && this.itemList.length) {
+      return this.itemList
+        .filter((it) => it.media)
+        .map((it) => {
+          this.href = it.media;
+          const list = this._prepareResult().map((item) => ({
+            link: `${playerLink}${encodeURIComponent(item.link)}`,
+            name: `${this.title}_${it.name}`,
+            quality: item.type,
+            qualityLinkList: [],
+          }));
+          return of(list.at(0));
+        });
+    }
+
+    // Fallback to existing _prepareResult flow
     return this._prepareResult().map((item) =>
       of({
         link: `${playerLink}${encodeURIComponent(item.link)}`,
@@ -92,18 +70,6 @@ class Worker {
         quality: item.type,
         qualityLinkList: [],
       }),
-    );
-  }
-
-  getHtml(link) {
-    return this._loadPage(link).pipe(
-      switchMap((data) => fromPromise(data.text())),
-    );
-  }
-
-  getJson(link) {
-    return this._loadPage(link).pipe(
-      switchMap((data) => fromPromise(data.json())),
     );
   }
 
@@ -119,6 +85,16 @@ class Worker {
           );
           return this.getJson(link).pipe(
             map((pageJson) => {
+              if (Boolean(!pageJson.hash && pageJson.seasonGallery)) {
+                this.itemList = pageJson.seasonGallery.items.map((item) => {
+                  return {
+                    title: item.title,
+                    hash: item.hash,
+                    name: item.videoSlug,
+                  };
+                });
+                return of(this.itemList);
+              }
               this.hashId[1] = pageJson.hash;
 
               if (!this.hashId[1]) {
@@ -133,15 +109,65 @@ class Worker {
         return of(this.hashId);
       }),
       switchMap(() => {
+        if (
+          this.itemList &&
+          Array.isArray(this.itemList) &&
+          this.itemList.length
+        ) {
+          // for each item (with hash) call API and collect first video entry
+          const calls = this.itemList.map((item) => {
+            const url = this.teleportalApiUrl
+              .replace("{{hash}}", item.hash)
+              .replace("{{referer}}", "https://teleportal.ua/");
+            return this.getJson(url).pipe(
+              map((apiJson) => ({ item, apiJson })),
+            );
+          });
+          return forkJoin(calls).pipe(
+            map((results) => {
+              const collected = results.map(({ item, apiJson }) => {
+                const video = apiJson?.video || apiJson?.result?.video || [];
+                const first = video[0] || null;
+                const media =
+                  first?.mediaHlsNoAdv || first?.media?.mediaHlsNoAdv || null;
+                return {
+                  title: item.title,
+                  name: item.name,
+                  hash: item.hash,
+                  program: first?.program || null,
+                  projectName: first?.projectName || null,
+                  media,
+                };
+              });
+              // store detailed list
+              this.itemList = collected;
+              return collected;
+            }),
+          );
+        }
+
         const link = this.teleportalApiUrl
           .replace("{{hash}}", this.hashId[1])
           .replace("{{referer}}", "https://teleportal.ua/");
         return this.getJson(link).pipe(map((apiJson) => apiJson.video[0]));
       }),
-      tap((video) => {
-        this.href = video.mediaHlsNoAdv;
-        this.fileName = video.program;
-        this.title = `${video.projectName}-${video.releaseName}-${video.seasonName}`;
+      tap((videoOrList) => {
+        if (Array.isArray(videoOrList)) {
+          // we received a list of items with media
+          const firstWithMedia = videoOrList.find((i) => i.media);
+          if (!firstWithMedia) {
+            throw new Error("не знайшов відео в перелiку itemList");
+          }
+          this.href = firstWithMedia.media;
+          this.fileName = firstWithMedia.program || this.fileName;
+          this.title =
+            this.title || firstWithMedia.projectName || firstWithMedia.title;
+        } else {
+          const video = videoOrList;
+          this.href = video.mediaHlsNoAdv;
+          this.fileName = video.program;
+          this.title = `${video.projectName}-${video.releaseName}-${video.seasonName}`;
+        }
 
         if (!this.href) {
           throw new Error("не знайшов відео");

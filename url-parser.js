@@ -35,5 +35,9 @@ module.exports.parse = (link) => {
     return "uakino.club";
   }
 
+  if (filename.includes("novy.tv")) {
+    return "novy.tv";
+  }
+
   return filename || "";
 };

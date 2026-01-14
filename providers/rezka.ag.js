@@ -1,5 +1,6 @@
 const fetch = require("node-fetch");
 const stepEnum = require(`${__dirname}/../step-enum-util`);
+const ProviderBase = require(`${__dirname}/provider.base`);
 const {
   from,
   of,
@@ -18,7 +19,6 @@ const {
 const http = require("https");
 const fs = require("fs");
 const cheerio = require("cheerio");
-const cookies = [];
 const cookieJar = new Map();
 let translatorList;
 
@@ -37,23 +37,21 @@ const AUTH_CONFIG = {
   domain: "rezka.fi",
 };
 
-class Worker {
+class Worker extends ProviderBase {
   constructor(link) {
+    super(link);
     console.log("Worker constructor - rezka");
-    this.pageLink = link;
     this.filmType = this.getTypeByName(link.split("/")[3]);
     const parsedLink = link.match(
       /\/(\d+)(?:-[^\/]+)?(?:\/(\d+)(?:-[^\/]+)?)?(?:\/(\d+)(?:-[^\/]+)?)?/,
     );
     // This.translator_id = (link.match(/\/(\d+)+.+?[\/]*(\d+)?.+?[\/]?(\d+)?.+?/) || [])[1];
     this.translator_id = (parsedLink || [])[2];
-    this.html = "";
     this.html$ = "";
     this.title = "";
     this.filmId = (parsedLink || [])[1];
     this.seasonId = (parsedLink || [])[3];
     // This.seasonId = (link.match(/#t:(\d+)?-s:(\d+)?/) || [])[2];
-    this.domain = this.extractDomain(link);
     this.episodeList = new Map();
     this._selectedEpisodes = [];
     this.isAuthenticated = false;
@@ -61,9 +59,7 @@ class Worker {
   }
 
   extractDomain(link) {
-    const regex = /^https?:\/\/([^\/]+)\//;
-    const match = link.match(regex);
-    return match ? match[1] : null;
+    return super.extractDomain(link);
   }
 
   parseCookies(setCookieHeaders) {
@@ -476,10 +472,6 @@ class Worker {
       default:
         return FilmTypeEnum.FILM;
     }
-  }
-
-  parseMetaTag(tag) {
-    return this.html$(`meta[property="${tag}"]`).attr("content");
   }
 
   getFilmId() {

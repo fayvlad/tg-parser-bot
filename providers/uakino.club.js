@@ -1,8 +1,8 @@
-const fetch = require("node-fetch");
 const stepEnum = require(`${__dirname}/../step-enum-util`);
 const cp = require("child_process");
-const { from, switchMap, tap, map, of, forkJoin, take, iif } = require("rxjs");
-const fs = require("fs");
+const { switchMap, tap, map, of, iif } = require("rxjs");
+const ProviderBase = require(`${__dirname}/provider.base`);
+
 const playerLink = "https://fayvlad.github.io/player/?source=";
 
 const FilmTypeEnum = {
@@ -14,21 +14,18 @@ const FilmTypeEnum = {
   TVSHOWS: 4,
 };
 
-class Worker {
+class Worker extends ProviderBase {
   constructor(link) {
+    super(link);
     console.log("Worker constructor - uakino.club");
-    this.html = "";
     this.title = this.extractTitle(link);
     this.fileName = "";
     this.href = "";
     this.seasonId = "seasonId";
     this.hashId = [];
     this.filmType = this.getTypeByName(link);
-    this.episodeList = new Map();
     this.translatorList = new Map();
     this.translatorId = null;
-    this.pageLink = link;
-    this.domain = this.extractDomain(link);
     this._selectedEpisodes = [];
     this.id = this.extractId(link);
     this.apiUrl = `https://${this.domain}/engine/ajax/playlists.php?news_id=${this.id}&xfield=playlist&time=${Date.now()}`;
@@ -40,9 +37,7 @@ class Worker {
   }
 
   extractDomain(link) {
-    const regex = /^https?:\/\/([^\/]+)\//;
-    const match = link.match(regex);
-    return match ? match[1] : null;
+    return super.extractDomain(link);
   }
 
   extractId(link) {
@@ -136,19 +131,12 @@ class Worker {
   }
 
   parse() {
-    const path = "/mnt/video/playlists/m3u/uakino.m3u";
-
-    forkJoin([...this.getLinks()])
-      .pipe(
-        tap((links) => {
-          links.forEach((link, name) => {
-            fs.appendFileSync(path, `#EXTINF:0,${name}\n`);
-            fs.appendFileSync(path, `${link}\n`);
-          });
-        }),
-        take(1),
-      )
-      .subscribe();
+    const download = async (uri, filename) =>
+      cp.execSync(`curl -k -o ${filename}  '${uri}'`);
+    return this._prepareResult().map(async (film) => {
+      this._writeToPlaylist(film);
+      await download(film.link, `/mnt/video/playlists/m3u/tv/${film.name}`);
+    });
   }
 
   getNextStep(currentStep) {
@@ -163,80 +151,6 @@ class Worker {
       return stepEnum.WORKER_GET_EPISODES;
       // Return stepEnum.WORKER_GET_SEASON;
     }
-  }
-
-  _writeToPlaylist(data) {
-    const path = `/mnt/video/playlists/m3u/parser${data.type === "lq" ? ".lq" : ""}.m3u`;
-
-    fs.appendFileSync(path, `#EXTINF:0,${data.title}\n`);
-    fs.appendFileSync(path, `${data.playlistLink}\n`);
-  }
-
-  _loadPage(link) {
-    return fetch(link, {
-      referrer: link,
-      headers: {
-        accept: "*/*",
-        "x-requested-with": "XMLHttpRequest",
-        "accept-language": "uk",
-        "cache-control": "no-cache",
-        pragma: "no-cache",
-        priority: "u=1, i",
-        "sec-ch-ua":
-          '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"macOS"',
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-origin",
-        Referer: link,
-        "Referrer-Policy": "strict-origin-when-cross-origin",
-      },
-      referrerPolicy: "no-referrer-when-downgrade",
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! Status: ${response.status}`);
-        }
-
-        return response;
-      })
-      .catch((error) => {
-        console.log(error);
-        throw new Error(
-          `Failed to load episode: ${error.message} | Request body: ${JSON.stringify(error)}`,
-        );
-      });
-  }
-
-  _decodeUrlFromText(href) {
-    return [...decodeURIComponent(href).matchAll(/file=(http.+?m3u8)?\?/g)];
-  }
-
-  _prepareResult() {
-    const addonLink = "http://192.168.1.200/m3u/tv/";
-    return this._decodeUrlFromText(this.href).map((itm) => {
-      const link = itm[1];
-      const type = link.match(/(\w*)\.mp4/)[1];
-      const name = `${this.fileName}.${type}.m3u8`;
-
-      return {
-        link,
-        name,
-        type,
-        title: this.title,
-        playlistLink: `${addonLink}${name}`,
-      };
-    });
-  }
-
-  parse() {
-    const download = async (uri, filename) =>
-      cp.execSync(`curl -k -o ${filename}  '${uri}'`);
-    return this._prepareResult().map(async (film) => {
-      this._writeToPlaylist(film);
-      await download(film.link, `/mnt/video/playlists/m3u/tv/${film.name}`);
-    });
   }
 
   getLinks() {
@@ -254,16 +168,8 @@ class Worker {
     return this._selectedEpisodes.map((item) => m3uLink(item));
   }
 
-  getHtml(link) {
-    return from(this._loadPage(link).then((data) => data.text()));
-  }
-
-  getJson(link) {
-    return from(this._loadPage(link).then((data) => data.json()));
-  }
-
-  setSelectedEpisodesBySesone(val) {
-    this._selectedEpisodes = [...this.episodeList.values()];
+  setSelectedEpisodesBySesone(seasonId) {
+    this._selectedEpisodes = [...(this.episodeList.get(seasonId) || [])];
   }
 
   loadPage() {
@@ -357,21 +263,6 @@ class Worker {
       default:
         return FilmTypeEnum.FILM;
     }
-  }
-
-  parseMetaTag(tag) {
-    const content =
-      this.html.match(
-        new RegExp(`<meta property="${tag}" content="([^"]*)"`),
-      ) || [];
-    return content[1];
-  }
-
-  parseLinkTag(tag) {
-    const content =
-      this.html.match(new RegExp(`<link itemprop="${tag}" value="(.*?)"`)) ||
-      [];
-    return content[1];
   }
 }
 
