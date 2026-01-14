@@ -53,4 +53,5 @@ jq -c '.[]' "$input_file" | while read -r item; do
 
 done
 
+rm "$input_file"
 echo "🚀 Завантаження завершено!"
